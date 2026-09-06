@@ -1,0 +1,111 @@
+openapi: 3.1.0
+info:
+  title: Axesistemas Signature Service
+  version: 0.1.0
+  description: API interna do D-009A. Tenant é derivado exclusivamente da credencial autenticada no servidor.
+servers:
+  - url: /
+paths:
+  /health:
+    get:
+      operationId: health
+      responses:
+        '200':
+          description: Serviço disponível
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: ok
+  /v1/signature-requests:
+    post:
+      operationId: createSignatureRequest
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [signer, documentBase64]
+              properties:
+                tenantId:
+                  description: Campo tolerado por compatibilidade, sem qualquer autoridade. É ignorado.
+                signer:
+                  type: object
+                  additionalProperties: false
+                  required: [name]
+                  properties:
+                    name: { type: string, minLength: 1, maxLength: 200 }
+                    document: { type: string, minLength: 1, maxLength: 100 }
+                    email: { type: string, format: email, maxLength: 320 }
+                documentBase64:
+                  type: string
+                  minLength: 1
+                  maxLength: 14000000
+                contentType:
+                  type: string
+                  maxLength: 200
+      responses:
+        '201':
+          description: Solicitação criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicSignatureRequest'
+        '400': { description: Requisição inválida }
+        '401': { description: Credencial ausente ou desconhecida }
+        '403': { description: Contexto de tenant não resolvido }
+  /v1/signature-requests/{id}:
+    get:
+      operationId: getSignatureRequest
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 200 }
+      responses:
+        '200':
+          description: Solicitação encontrada no tenant autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicSignatureRequest'
+        '401': { description: Credencial ausente ou desconhecida }
+        '403': { description: Contexto de tenant não resolvido }
+        '404': { description: Solicitação não encontrada no tenant autenticado }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    PublicSignatureRequest:
+      type: object
+      additionalProperties: false
+      required: [id, status, documentSha256, signer]
+      properties:
+        id: { type: string }
+        status:
+          type: string
+          enum: [draft, pending, signed, rejected, expired, failed]
+        documentSha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        providerRequestId: { type: string }
+        signer:
+          type: object
+          additionalProperties: false
+          required: [name]
+          properties:
+            name: { type: string }
+            document: { type: string }
+            email: { type: string, format: email }
