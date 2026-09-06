@@ -12,6 +12,7 @@ export type SignatureEvidence = {
 export interface SignatureRepository {
   create(tenantId: string, request: SignatureRequest): Promise<void>;
   findById(tenantId: string, id: string): Promise<SignatureRequest | null>;
+  setProviderRequestId(tenantId: string, id: string, providerRequestId: string): Promise<boolean>;
   updateStatus(tenantId: string, id: string, status: SignatureStatus): Promise<boolean>;
   appendEvidence(tenantId: string, evidence: SignatureEvidence): Promise<void>;
 }
@@ -34,6 +35,18 @@ export class InMemorySignatureRepository implements SignatureRepository {
   async findById(tenantId: string, id: string): Promise<SignatureRequest | null> {
     const request = this.requests.get(this.key(tenantId, id));
     return request ? structuredClone(request) : null;
+  }
+
+  async setProviderRequestId(
+    tenantId: string,
+    id: string,
+    providerRequestId: string
+  ): Promise<boolean> {
+    const key = this.key(tenantId, id);
+    const current = this.requests.get(key);
+    if (!current) return false;
+    this.requests.set(key, { ...current, providerRequestId });
+    return true;
   }
 
   async updateStatus(
