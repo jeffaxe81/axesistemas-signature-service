@@ -7,7 +7,7 @@ import { ProviderWebhookHandler, InMemoryProviderEventStore } from "./providerWe
 
 class CountingRepository extends InMemorySignatureRepository {
   statusUpdateCount = 0;
-  evidence: SignatureEvidence[] = [];
+  capturedEvidence: SignatureEvidence[] = [];
 
   override async updateStatus(tenantId: string, id: string, status: Parameters<InMemorySignatureRepository["updateStatus"]>[2]) {
     const changed = await super.updateStatus(tenantId, id, status);
@@ -16,7 +16,7 @@ class CountingRepository extends InMemorySignatureRepository {
   }
 
   override async appendEvidence(tenantId: string, evidence: SignatureEvidence) {
-    this.evidence.push(evidence);
+    this.capturedEvidence.push(evidence);
     return super.appendEvidence(tenantId, evidence);
   }
 }
@@ -51,7 +51,7 @@ describe("ProviderWebhookHandler", () => {
 
     expect(repo.statusUpdateCount).toBe(1);
     await expect(repo.findById("tenant-a", "req-1")).resolves.toMatchObject({ status: "signed" });
-    expect(repo.evidence).toHaveLength(1);
+    expect(repo.capturedEvidence).toHaveLength(1);
   });
 
   it("fails closed when the request belongs to another tenant", async () => {
