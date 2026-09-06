@@ -5,9 +5,12 @@ import type {
 } from "./signatureProvider.js";
 
 export class FakeSignatureProvider implements SignatureProvider {
+  lastCreate?: CreateSignatureProviderRequest;
+
   async createRequest(
     input: CreateSignatureProviderRequest
   ): Promise<CreateSignatureProviderResult> {
+    this.lastCreate = structuredClone(input);
     return { providerRequestId: `fake:${input.requestId}` };
   }
 
