@@ -22,6 +22,7 @@
 - `production-standard` rejeita qualquer provider, certificado ou timestamp com `trustMode: "fake"`.
 - Não existe fallback automático de provider real para provider fake.
 - Migração PostgreSQL é aditiva e preserva `signature_requests` e `signature_evidence` existentes.
+- O repositório atual usa migration SQL + `_journal.json` sem snapshot Drizzle; a D-009B deve seguir o mesmo padrão e não executar migration em banco real.
 - Gates obrigatórios antes de merge: `pnpm security:check`, `pnpm check`, `pnpm test`, `pnpm build`.
 
 ---
@@ -54,7 +55,7 @@ const fakeProvider: ProviderDescriptor = {
 };
 
 describe("TrustProfile", () => {
-  it("permite provider fake somente no profile fake-dev", () => {
+  it("permite provider fake no profile fake-dev", () => {
     expect(() => assertProviderAllowed(fakeDevProfile, fakeProvider)).not.toThrow();
   });
 
@@ -70,7 +71,7 @@ describe("TrustProfile", () => {
 
 Run: `pnpm vitest run src/trust/trustProfile.test.ts`
 
-Expected: FAIL porque `trustProfile.ts` e `capabilities.ts` ainda não existem.
+Expected: FAIL porque os módulos ainda não existem.
 
 - [ ] **Step 3: Implementar os tipos de capacidade**
 
@@ -98,7 +99,7 @@ export type ProviderDescriptor = {
 };
 ```
 
-- [ ] **Step 4: Implementar `TrustProfile` com rejeição explícita do modo fake em produção**
+- [ ] **Step 4: Implementar `TrustProfile` com bloqueio explícito de FAKE em produção**
 
 ```ts
 import type { ProviderDescriptor, SignatureFormat, SignatureLevel, TrustMode } from "./capabilities.js";
@@ -116,6 +117,15 @@ export const fakeDevProfile: TrustProfile = {
   id: "fake-dev",
   trustMode: "fake",
   allowedProviderIds: "*",
+  allowedLevels: ["simple", "advanced", "qualified"],
+  allowedFormats: ["pades", "cades", "xades", "xmldsig", "detached", "asic", "jades", "proprietary"],
+  timestampRequired: false,
+};
+
+export const sandboxProfile: TrustProfile = {
+  id: "sandbox",
+  trustMode: "sandbox",
+  allowedProviderIds: [],
   allowedLevels: ["simple", "advanced", "qualified"],
   allowedFormats: ["pades", "cades", "xades", "xmldsig", "detached", "asic", "jades", "proprietary"],
   timestampRequired: false,
@@ -140,7 +150,7 @@ export function assertProviderAllowed(profile: TrustProfile, provider: ProviderD
 }
 ```
 
-- [ ] **Step 5: Rodar os testes e commit**
+- [ ] **Step 5: Rodar testes e commit**
 
 Run: `pnpm vitest run src/trust/trustProfile.test.ts && pnpm check`
 
@@ -164,26 +174,24 @@ git commit -m "feat: add trust capability model"
 
 **Interfaces:**
 - Consumes: `ProviderDescriptor`, `SignatureLevel`, `SignatureFormat` da Task 1; contrato v0.1.0 `SignatureProvider`.
-- Produces: `IdentityProvider`, `ConsentProvider`, `SigningProvider`, `ValidationProvider`, `TimestampProvider`, `LegacySignatureProviderAdapter`.
+- Produces: `IdentityProvider`, `ConsentProvider`, `SigningProvider`, `SigningResult`, `ValidationProvider`, `TimestampProvider`, `LegacySignatureProviderAdapter`.
 
 - [ ] **Step 1: Escrever teste vermelho do adapter legado**
 
 ```ts
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import { FakeSignatureProvider } from "./fakeSignatureProvider.js";
 import { LegacySignatureProviderAdapter } from "./legacySignatureProviderAdapter.js";
 
 it("adapta o provider v0.1.0 sem alterar seu contrato", async () => {
-  const legacy = new FakeSignatureProvider();
-  const adapter = new LegacySignatureProviderAdapter(legacy);
-  const result = await adapter.sign({
+  const adapter = new LegacySignatureProviderAdapter(new FakeSignatureProvider());
+  await expect(adapter.sign({
     requestId: "req-1",
     participantId: "participant-1",
     documentSha256: "abc",
     level: "simple",
     format: "detached",
-  });
-  expect(result).toEqual({ providerRequestId: "fake:req-1", status: "pending" });
+  })).resolves.toEqual({ providerRequestId: "fake:req-1", status: "pending" });
 });
 ```
 
@@ -193,7 +201,7 @@ Run: `pnpm vitest run src/providers/legacySignatureProviderAdapter.test.ts`
 
 Expected: FAIL por módulos ausentes.
 
-- [ ] **Step 3: Criar contratos focados**
+- [ ] **Step 3: Criar contratos focados, incluindo artefato assinado opcional**
 
 ```ts
 import type { ProviderDescriptor, SignatureFormat, SignatureLevel } from "../trust/capabilities.js";
@@ -206,9 +214,16 @@ export type SigningInput = {
   format: SignatureFormat;
 };
 
+export type SigningResult = {
+  providerRequestId: string;
+  status: "pending" | "signed";
+  signedArtifact?: Buffer;
+  evidence?: Record<string, unknown>;
+};
+
 export interface SigningProvider {
   readonly descriptor: ProviderDescriptor;
-  sign(input: SigningInput): Promise<{ providerRequestId: string; status: "pending" | "signed" }>;
+  sign(input: SigningInput): Promise<SigningResult>;
   cancel(providerRequestId: string): Promise<void>;
 }
 
@@ -224,36 +239,37 @@ export interface ConsentProvider {
 
 export interface ValidationProvider {
   readonly descriptor: ProviderDescriptor;
-  validate(input: { documentSha256: string; signedArtifact: Buffer }): Promise<{ valid: boolean; code?: string; evidence: Record<string, unknown> }>;
+  validate(input: { documentSha256: string; signedArtifact: Buffer }): Promise<{ valid: boolean; trustMode: "fake" | "sandbox" | "production"; code?: string; evidence: Record<string, unknown> }>;
 }
 
 export interface TimestampProvider {
   readonly descriptor: ProviderDescriptor;
-  timestamp(input: { artifactSha256: string }): Promise<{ token: string; issuedAt: string; evidence: Record<string, unknown> }>;
+  timestamp(input: { artifactSha256: string }): Promise<{ token: string; issuedAt: string; trustMode: "fake" | "sandbox" | "production"; evidence: Record<string, unknown> }>;
 }
 ```
 
-- [ ] **Step 4: Implementar adapter legado limitado a assinatura assíncrona**
+- [ ] **Step 4: Implementar adapter legado como provider assíncrono limitado**
 
 ```ts
+import type { ProviderDescriptor } from "../trust/capabilities.js";
 import type { SignatureProvider } from "./signatureProvider.js";
-import type { SigningInput, SigningProvider } from "./providerContracts.js";
+import type { SigningInput, SigningProvider, SigningResult } from "./providerContracts.js";
 
 export class LegacySignatureProviderAdapter implements SigningProvider {
-  readonly descriptor = {
+  readonly descriptor: ProviderDescriptor = {
     id: "legacy-signature-provider",
     version: "0.1.0",
-    kind: "signing" as const,
-    trustMode: "fake" as const,
-    signatureLevels: ["simple"] as const,
-    signatureFormats: ["detached"] as const,
+    kind: "signing",
+    trustMode: "fake",
+    signatureLevels: ["simple"],
+    signatureFormats: ["detached"],
   };
 
   constructor(private readonly legacy: SignatureProvider) {}
 
-  async sign(input: SigningInput) {
+  async sign(input: SigningInput): Promise<SigningResult> {
     const result = await this.legacy.createRequest({ requestId: input.requestId, documentSha256: input.documentSha256 });
-    return { providerRequestId: result.providerRequestId, status: "pending" as const };
+    return { providerRequestId: result.providerRequestId, status: "pending" };
   }
 
   async cancel(providerRequestId: string): Promise<void> {
@@ -266,7 +282,7 @@ export class LegacySignatureProviderAdapter implements SigningProvider {
 
 Run: `pnpm vitest run src/providers/fakeSignatureProvider.test.ts src/providers/legacySignatureProviderAdapter.test.ts && pnpm check`
 
-Expected: ambos PASS, provando que o contrato antigo continua intacto.
+Expected: PASS.
 
 ```bash
 git add src/providers
@@ -290,7 +306,7 @@ git commit -m "feat: split universal provider contracts"
 - [ ] **Step 1: Escrever testes vermelhos para ciclos independentes**
 
 ```ts
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import { transitionParticipantStatus } from "./participant.js";
 
 it("permite autenticar, consentir e assinar um participante", () => {
@@ -308,7 +324,7 @@ it("não permite signed voltar para pending", () => {
 
 Run: `pnpm vitest run src/signatures/participant.test.ts`
 
-Expected: FAIL por arquivo ausente.
+Expected: FAIL.
 
 - [ ] **Step 3: Implementar domínio de participante**
 
@@ -339,7 +355,7 @@ export function transitionParticipantStatus(current: ParticipantStatus, next: Pa
 }
 ```
 
-- [ ] **Step 4: Adicionar tipos universais em `domain.ts` sem remover `SignatureRequest` e `SignatureStatus` existentes**
+- [ ] **Step 4: Adicionar domínio universal a `domain.ts` preservando tipos v0.1.0**
 
 ```ts
 export type UniversalSignatureStatus =
@@ -366,9 +382,9 @@ export type UniversalSignatureRequest = {
 };
 ```
 
-Adicionar `transitionUniversalSignatureStatus` com transições explícitas, mantendo `transitionSignatureStatus` legado inalterado.
+Implementar `transitionUniversalSignatureStatus` por tabela explícita, mantendo `SignatureStatus`, `SignatureRequest` e `transitionSignatureStatus` atuais sem mudança incompatível.
 
-- [ ] **Step 5: Rodar regressão completa do domínio e commit**
+- [ ] **Step 5: Rodar regressão e commit**
 
 Run: `pnpm vitest run src/signatures/domain.test.ts src/signatures/participant.test.ts && pnpm check`
 
@@ -392,13 +408,13 @@ git commit -m "feat: add multi-participant trust domain"
 - Create: `src/fake-pki/fakePki.test.ts`
 
 **Interfaces:**
-- Consumes: `SigningProvider`, `ValidationProvider`, `TimestampProvider`, `ProviderDescriptor`.
-- Produces: fake certificates em memória, assinatura criptográfica de teste, validação de status e timestamp fake; nenhum material privado persistido.
+- Consumes: `SigningProvider`, `SigningResult`, `ValidationProvider`, `TimestampProvider`.
+- Produces: certificado fake estruturado, assinatura criptográfica de teste, validação de cadeia/status e timestamp fake; nenhuma chave privada persistida.
 
-- [ ] **Step 1: Escrever teste ponta a ponta vermelho da PKI FAKE**
+- [ ] **Step 1: Escrever testes ponta a ponta vermelhos**
 
 ```ts
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import { FakeCertificateAuthority } from "./fakeCertificateAuthority.js";
 import { FakeSigningProvider } from "./fakeSigningProvider.js";
 import { FakeValidationProvider } from "./fakeValidationProvider.js";
@@ -412,7 +428,7 @@ it("emite, assina e valida um artefato fake", async () => {
   await expect(validator.validateFakeArtifact(signed)).resolves.toMatchObject({ valid: true, trustMode: "fake" });
 });
 
-it("rejeita certificado expirado e revogado", async () => {
+it("expõe estados expirado e revogado", () => {
   const ca = new FakeCertificateAuthority({ now: () => new Date("2026-09-12T12:00:00Z") });
   const expired = ca.issue({ subject: "FAKE EXPIRED", validForSeconds: -1 });
   expect(ca.status(expired.serial)).toBe("expired");
@@ -426,14 +442,13 @@ it("rejeita certificado expirado e revogado", async () => {
 
 Run: `pnpm vitest run src/fake-pki/fakePki.test.ts`
 
-Expected: FAIL por módulos ausentes.
+Expected: FAIL.
 
-- [ ] **Step 3: Implementar CA fake exclusivamente em memória usando `node:crypto`**
+- [ ] **Step 3: Implementar CA fake em memória usando `node:crypto`**
 
-A CA deve usar `generateKeyPairSync("ed25519")`, manter as chaves privadas apenas em memória do objeto e emitir um `FakeCertificate` estruturado:
+Usar `generateKeyPairSync("ed25519")`. O objeto público deve ser:
 
 ```ts
-export type FakeCertificateStatus = "valid" | "expired" | "revoked" | "unknown";
 export type FakeCertificate = {
   serial: string;
   subject: string;
@@ -445,21 +460,37 @@ export type FakeCertificate = {
 };
 ```
 
-O serial deve ser derivado de SHA-256 de `subject + issuedAt + sequence`; nenhuma chave privada entra no objeto público do certificado.
+A CA mantém as chaves privadas em `Map<string, KeyObject>` somente em memória. `issue()` calcula serial via SHA-256 de `subject + issuedAt + sequence`; `revoke()` mantém um `Set<string>`; `status()` retorna `valid | expired | revoked | unknown`.
 
-- [ ] **Step 4: Implementar assinatura, validação e timestamp fake**
+- [ ] **Step 4: Implementar provider fake de assinatura com artefato verificável**
 
-`FakeSigningProvider` deve assinar bytes com a chave privada em memória da CA e retornar artefato contendo `certificateSerial`, `payloadSha256`, `signatureBase64`, `trustMode: "fake"`. `FakeValidationProvider` deve verificar hash, assinatura, existência da cadeia e status `valid`. `FakeTimestampProvider` deve emitir token estruturado com `artifactSha256`, `issuedAt`, `providerId: "fake-timestamp"`, `trustMode: "fake"` e hash de integridade.
+Definir:
 
-- [ ] **Step 5: Adicionar casos negativos**
+```ts
+export type FakeSignedArtifact = {
+  payload: Buffer;
+  payloadSha256: string;
+  certificateSerial: string;
+  signatureBase64: string;
+  trustMode: "fake";
+};
+```
 
-Testar explicitamente: `CERTIFICATE_EXPIRED`, `CERTIFICATE_REVOKED`, `CERTIFICATE_UNTRUSTED`, `SIGNATURE_INVALID`, `DOCUMENT_HASH_MISMATCH` e timestamp adulterado.
+`signBytes(bytes)` deve usar `crypto.sign(null, bytes, privateKey)`. `sign(input)` deve produzir um artefato serializado em `Buffer`, retornar `status: "signed"`, `providerRequestId: fake-pki:<requestId>` e `signedArtifact` preenchido.
 
-Run: `pnpm vitest run src/fake-pki/fakePki.test.ts`
+- [ ] **Step 5: Implementar validação e timestamp fake**
 
-Expected: todos PASS.
+`FakeValidationProvider` desserializa o artefato, recalcula SHA-256, consulta `ca.status(serial)`, obtém a chave pública e usa `crypto.verify`. Mapear falhas exatamente para `CERTIFICATE_EXPIRED`, `CERTIFICATE_REVOKED`, `CERTIFICATE_UNTRUSTED`, `SIGNATURE_INVALID`, `DOCUMENT_HASH_MISMATCH`.
 
-- [ ] **Step 6: Commit**
+`FakeTimestampProvider` retorna token JSON-base64 contendo `artifactSha256`, `issuedAt`, `providerId: "fake-timestamp"`, `trustMode: "fake"` e `integritySha256`. A validação do token recalcula `integritySha256` e rejeita alteração.
+
+- [ ] **Step 6: Adicionar cenários negativos e commit**
+
+Cobrir certificado expirado, revogado, serial desconhecido, assinatura adulterada, hash divergente e timestamp adulterado.
+
+Run: `pnpm vitest run src/fake-pki/fakePki.test.ts && pnpm check`
+
+Expected: PASS.
 
 ```bash
 git add src/fake-pki
@@ -475,25 +506,32 @@ git commit -m "feat: add isolated fake PKI test infrastructure"
 - Create: `src/trust/providerRegistry.test.ts`
 
 **Interfaces:**
-- Consumes: descriptors e `TrustProfile`; contratos das Tasks 1 e 2.
+- Consumes: `ProviderDescriptor`, `TrustProfile`, `assertProviderAllowed`.
 - Produces: `ProviderRegistry.register(provider)`, `ProviderRegistry.resolve(kind, profile, requirements)`.
 
-- [ ] **Step 1: Escrever testes vermelhos**
+- [ ] **Step 1: Escrever testes vermelhos de resolução**
 
 ```ts
 import { expect, it } from "vitest";
 import { ProviderRegistry } from "./providerRegistry.js";
 import { fakeDevProfile, productionStandardProfile } from "./trustProfile.js";
 
-it("resolve provider pela capacidade e política", () => {
+const fake = {
+  descriptor: {
+    id: "fake-sign", version: "1", kind: "signing" as const, trustMode: "fake" as const,
+    signatureLevels: ["advanced" as const], signatureFormats: ["detached" as const],
+  },
+};
+
+it("resolve provider compatível com capacidade e profile", () => {
   const registry = new ProviderRegistry();
-  registry.register({ descriptor: { id: "fake-sign", version: "1", kind: "signing", trustMode: "fake", signatureLevels: ["advanced"], signatureFormats: ["detached"] } });
+  registry.register(fake);
   expect(registry.resolve("signing", fakeDevProfile, { level: "advanced", format: "detached" }).descriptor.id).toBe("fake-sign");
 });
 
 it("não faz fallback fake em produção", () => {
   const registry = new ProviderRegistry();
-  registry.register({ descriptor: { id: "fake-sign", version: "1", kind: "signing", trustMode: "fake", signatureLevels: ["advanced"], signatureFormats: ["detached"] } });
+  registry.register(fake);
   expect(() => registry.resolve("signing", productionStandardProfile, { level: "advanced", format: "detached" })).toThrow("UNSUPPORTED_CAPABILITY");
 });
 ```
@@ -504,9 +542,33 @@ Run: `pnpm vitest run src/trust/providerRegistry.test.ts`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implementar registro determinístico e fail-closed**
+- [ ] **Step 3: Implementar registro determinístico**
 
-A resolução deve filtrar nesta ordem: `kind` → política (`assertProviderAllowed`) → nível → formato. Se nenhum candidato restar, lançar `UNSUPPORTED_CAPABILITY`. Não tentar provider de outro `trustMode` e não selecionar automaticamente o primeiro provider fake para satisfazer perfil real.
+```ts
+import type { ProviderDescriptor, ProviderKind, SignatureFormat, SignatureLevel } from "./capabilities.js";
+import type { TrustProfile } from "./trustProfile.js";
+import { assertProviderAllowed } from "./trustProfile.js";
+
+export type RegisteredProvider = { descriptor: ProviderDescriptor };
+
+export class ProviderRegistry {
+  private readonly providers: RegisteredProvider[] = [];
+  register(provider: RegisteredProvider): void { this.providers.push(provider); }
+
+  resolve(kind: ProviderKind, profile: TrustProfile, requirements: { level: SignatureLevel; format: SignatureFormat }): RegisteredProvider {
+    const candidate = this.providers.find(provider => {
+      if (provider.descriptor.kind !== kind) return false;
+      try { assertProviderAllowed(profile, provider.descriptor); } catch { return false; }
+      return provider.descriptor.signatureLevels.includes(requirements.level)
+        && provider.descriptor.signatureFormats.includes(requirements.format);
+    });
+    if (!candidate) throw new Error("UNSUPPORTED_CAPABILITY");
+    return candidate;
+  }
+}
+```
+
+Não adicionar segunda tentativa com provider de outro `trustMode`.
 
 - [ ] **Step 4: Rodar testes e commit**
 
@@ -531,28 +593,59 @@ git commit -m "feat: add fail-closed provider registry"
 
 **Interfaces:**
 - Consumes: entidades universais das Tasks 1–3.
-- Produces: tabelas tenant-scoped adicionais sem remover colunas/tabelas v0.1.0.
+- Produces: tabelas tenant-scoped adicionais sem alterar destrutivamente o schema v0.1.0.
 
-- [ ] **Step 1: Escrever teste de regressão estrutural no repositório in-memory**
-
-Manter os testes existentes que provam que `findById` e `updateStatus` nunca atravessam tenants. Adicionar um teste de evidência para garantir rejeição de `tenantId` divergente:
+- [ ] **Step 1: Fortalecer teste de tenant em evidências**
 
 ```ts
 it("rejects evidence from another tenant", async () => {
   const repo = new InMemorySignatureRepository();
   await expect(repo.appendEvidence("tenant-a", {
-    id: "ev-1", requestId: "req-1", tenantId: "tenant-b", type: "validation.completed", payload: {}, createdAt: "2026-09-12T12:00:00Z"
+    id: "ev-1",
+    requestId: "req-1",
+    tenantId: "tenant-b",
+    type: "validation.completed",
+    payload: {},
+    createdAt: "2026-09-12T12:00:00Z",
   })).rejects.toThrow("TENANT_MISMATCH");
 });
 ```
 
-- [ ] **Step 2: Expandir `schema.ts` com tabelas aditivas**
+Run: `pnpm vitest run src/db/signatureRepository.test.ts`
 
-Criar: `signature_participants`, `provider_bindings`, `document_artifacts`, `signature_artifacts`, `validation_results`, `trust_profiles`. Toda tabela operacional deve conter `tenant_id`; chaves primárias devem incluir `tenant_id`. Não adicionar campo contendo `privateKey`, `private_key`, PEM privado ou segredo de certificado.
+Expected: PASS no código atual; esse teste fixa a regressão antes de expandir o schema.
 
-- [ ] **Step 3: Criar migration `0001_d009b_universal_trust.sql`**
+- [ ] **Step 2: Expandir `schema.ts` de forma aditiva**
 
-A migration deve somente usar `CREATE TABLE`/`CREATE INDEX` para as novas entidades; não executar `DROP`, `TRUNCATE` ou alteração destrutiva de `signature_requests`/`signature_evidence`. Exemplo obrigatório para participantes:
+Criar tabelas `signature_participants`, `provider_bindings`, `document_artifacts`, `signature_artifacts`, `validation_results`, `trust_profiles`. Toda tabela operacional deve conter `tenant_id`, e as chaves primárias devem incluir `tenant_id`. Não criar coluna com nome ou conteúdo de chave privada.
+
+Exemplo da tabela de participantes:
+
+```ts
+export const signatureParticipants = pgTable("signature_participants", {
+  tenantId: text("tenant_id").notNull(),
+  requestId: text("request_id").notNull(),
+  id: text("id").notNull(),
+  role: text("role").notNull(),
+  status: text("status").notNull(),
+  signingOrder: integer("signing_order"),
+  identity: jsonb("identity").$type<Record<string, unknown>>().notNull(),
+  authenticationMethods: jsonb("authentication_methods").$type<string[]>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, table => [
+  primaryKey({ columns: [table.tenantId, table.id] }),
+  index("signature_participants_tenant_request_idx").on(table.tenantId, table.requestId),
+]);
+```
+
+Adicionar `integer` aos imports de `drizzle-orm/pg-core`.
+
+- [ ] **Step 3: Criar migration manual seguindo o padrão atual do repositório**
+
+Criar `drizzle/0001_d009b_universal_trust.sql` somente com `CREATE TABLE` e `CREATE INDEX` correspondentes às seis novas tabelas. Não usar `DROP`, `TRUNCATE`, `ALTER ... DROP` e não recriar `signature_requests` nem `signature_evidence`.
+
+Trecho obrigatório:
 
 ```sql
 CREATE TABLE "signature_participants" (
@@ -568,24 +661,31 @@ CREATE TABLE "signature_participants" (
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "signature_participants_tenant_id_id_pk" PRIMARY KEY("tenant_id", "id")
 );
-CREATE INDEX "signature_participants_tenant_request_idx" ON "signature_participants" ("tenant_id", "request_id");
+--> statement-breakpoint
+CREATE INDEX "signature_participants_tenant_request_idx" ON "signature_participants" USING btree ("tenant_id", "request_id");
 ```
 
-- [ ] **Step 4: Journalar a migration**
+- [ ] **Step 4: Atualizar journal no mesmo padrão da migration 0000**
 
-Adicionar entrada `idx: 1`, `version: "7"`, `tag: "0001_d009b_universal_trust"`, `breakpoints: true` em `drizzle/meta/_journal.json`. Não inserir conexão de banco no `drizzle.config.ts`.
+Adicionar exatamente uma segunda entrada em `drizzle/meta/_journal.json`:
 
-- [ ] **Step 5: Rodar gates de schema**
+```json
+{
+  "idx": 1,
+  "version": "7",
+  "when": 1789236000000,
+  "tag": "0001_d009b_universal_trust",
+  "breakpoints": true
+}
+```
 
-Run: `pnpm db:generate`
+Não executar `pnpm db:generate` nesta task, porque o repositório atual não possui snapshot Drizzle e a geração automática poderia reconstruir o schema inicial. Não aplicar a migration em banco real.
 
-Expected: nenhuma divergência destrutiva; se o Drizzle gerar migration adicional inesperada, corrigir `schema.ts`/migration antes de seguir e manter exatamente uma migration D-009B journaled.
+- [ ] **Step 5: Rodar gates de schema e commit**
 
 Run: `pnpm security:check && pnpm vitest run src/db/signatureRepository.test.ts && pnpm check`
 
-Expected: PASS.
-
-- [ ] **Step 6: Commit**
+Expected: migration e journal com contagem 1:1, nenhuma chave privada detectada, testes PASS.
 
 ```bash
 git add src/db drizzle
@@ -607,60 +707,90 @@ git commit -m "feat: add additive D-009B trust schema"
 - Preserve behavior: `src/http/signatureRoutes.ts`, `src/signatures/signatureService.ts`
 
 **Interfaces:**
-- Consumes: `ProviderRegistry`, `TrustProfile`, multi-participante e providers fake.
-- Produces: `UniversalTrustService` como nova orquestração D-009B sem substituir `SignatureService` v1.
+- Consumes: `ProviderRegistry`, `TrustProfile`, multi-participante, `SigningProvider`, `ValidationProvider`, `TimestampProvider` e PKI FAKE.
+- Produces: `UniversalTrustService.execute()` como nova orquestração D-009B sem substituir `SignatureService` v1.
 
-- [ ] **Step 1: Escrever teste vermelho do fluxo universal fake-dev**
+- [ ] **Step 1: Escrever teste vermelho do fluxo `fake-dev`**
 
 ```ts
 import { expect, it } from "vitest";
-import { UniversalTrustService } from "./universalTrustService.js";
+import { makeFakeUniversalService } from "../fake-pki/testFactory.js";
 
-it("completa somente depois de assinatura e validação permitidas pelo trust profile", async () => {
-  const result = await makeFakeUniversalService().execute({
+it("completa somente após assinatura e validação aprovadas", async () => {
+  const service = makeFakeUniversalService();
+  const result = await service.execute({
     tenantId: "tenant-a",
     requestId: "req-1",
     trustProfileId: "fake-dev",
     document: Buffer.from("doc"),
     level: "advanced",
     format: "detached",
-    participants: [{ id: "p1", role: "signer", identity: { name: "Ana" }, authenticationMethods: ["fake"] }],
+    participants: [{
+      id: "p1", role: "signer", status: "authenticated",
+      identity: { name: "Ana" }, authenticationMethods: ["fake"],
+    }],
   });
   expect(result.status).toBe("completed");
-  expect(result.validation.valid).toBe(true);
-  expect(result.validation.trustMode).toBe("fake");
+  expect(result.validation).toMatchObject({ valid: true, trustMode: "fake" });
 });
 ```
 
-Adicionar teste equivalente com `trustProfileId: "production-standard"` que espere `TRUST_POLICY_VIOLATION`/`UNSUPPORTED_CAPABILITY` antes de qualquer assinatura fake.
+Criar `src/fake-pki/testFactory.ts` na mesma task para compor CA, providers e registry exclusivamente para testes.
+
+Adicionar teste com `trustProfileId: "production-standard"` que espere `UNSUPPORTED_CAPABILITY` antes de `FakeSigningProvider.sign()` ser chamado.
 
 - [ ] **Step 2: Implementar `UniversalTrustService` mínimo**
 
-O serviço deve: calcular SHA-256; resolver `TrustProfile`; resolver `SigningProvider` via registry; executar assinatura; aplicar timestamp quando o profile exigir; resolver `ValidationProvider`; validar; retornar `completed` somente com `valid === true`. Cada exceção deve ser mapeada para os códigos de domínio definidos na spec; não capturar falha real e tentar provider fake.
+Fluxo obrigatório: calcular SHA-256 → resolver profile → resolver signing provider → assinar → se `pending`, retornar `awaiting_participants` sem validação → se `signed`, exigir `signedArtifact` → opcionalmente timestamp conforme profile → resolver validation provider → validar → retornar `completed` apenas com `valid === true`.
+
+Assinatura pública mínima:
+
+```ts
+export class UniversalTrustService {
+  async execute(input: UniversalTrustExecutionInput): Promise<UniversalTrustExecutionResult> {
+    // implementação pelos passos do fluxo acima
+  }
+}
+```
+
+Erros de capacidade/política devem permanecer códigos de domínio. Não capturar erro de provider real para tentar provider fake.
 
 - [ ] **Step 3: Revalidar API v1 sem alteração funcional**
 
 Run: `pnpm vitest run src/http/signatureRoutes.test.ts src/signatures/signatureService.test.ts src/providers/fakeSignatureProvider.test.ts`
 
-Expected: todos os testes v0.1.0 continuam PASS e `/v1/signature-requests` continua retornando `pending` com `providerRequestId: fake:req-*` no fixture legado.
+Expected: todos PASS; `/v1/signature-requests` continua retornando `pending` com `providerRequestId: fake:req-*` nos fixtures atuais.
 
 - [ ] **Step 4: Fortalecer security regression gate**
 
-Em `scripts/security-regression-check.mjs`, adicionar leituras de `src/trust/trustProfile.ts`, `src/fake-pki/fakeCertificateAuthority.ts` e `src/db/schema.ts`. O script deve falhar se:
+Adicionar ao `scripts/security-regression-check.mjs` leitura de `src/trust/trustProfile.ts`, `src/trust/providerRegistry.ts`, `src/fake-pki/fakeCertificateAuthority.ts` e `src/db/schema.ts`.
+
+Adicionar checks equivalentes a:
 
 ```js
-!trustProfile.includes('profile.trustMode === "production" && provider.trustMode === "fake"')
+requireCondition(
+  trustProfile.includes('profile.trustMode === "production" && provider.trustMode === "fake"'),
+  "O profile produtivo deixou de rejeitar provider fake."
+);
+requireCondition(
+  !/private[_-]?key|privateKey|BEGIN PRIVATE KEY|pem\s*:/i.test(schema),
+  "O schema passou a persistir material de chave privada."
+);
+requireCondition(
+  !providerRegistry.includes("fallbackFake") && !providerRegistry.includes("fallbackToFake"),
+  "O registry introduziu fallback explícito para provider fake."
+);
 ```
 
-ou se o schema contiver o padrão existente de chave privada. Adicionar também condição que confirme a presença do `trustMode: "fake"` nos providers fake e ausência de fallback textual `fallback` do registry para modo fake.
+A CA fake pode manter `KeyObject` privado em memória; o gate deve proibir persistência no schema e arquivos de migration, não a existência controlada do material efêmero dentro de `src/fake-pki`.
 
 - [ ] **Step 5: Atualizar OpenAPI e documentação**
 
-`docs/openapi.yaml`: manter integralmente os paths v1 atuais e acrescentar schemas reutilizáveis `TrustMode`, `SignatureLevel`, `SignatureFormat`, `Participant` e `ProviderCapability`; não anunciar provider ICP-Brasil real como disponível.
+`docs/openapi.yaml`: manter integralmente os paths v1 e acrescentar schemas reutilizáveis `TrustMode`, `SignatureLevel`, `SignatureFormat`, `Participant` e `ProviderCapability`. Não anunciar ICP-Brasil real, PAdES/CAdES/XAdES real ou provider comercial como entregue.
 
-`README.md`: substituir o estado obsoleto “D-009A em desenvolvimento” por “v0.1.0/D-009A encerrada; D-009B em evolução”, documentar PKI FAKE como não produtiva e incluir comandos de qualidade.
+`README.md`: corrigir o estado para “v0.1.0/D-009A encerrada; D-009B em evolução”; documentar que PKI FAKE é somente teste/desenvolvimento; manter comandos `security:check`, `check`, `test`, `build`.
 
-`CHANGELOG.md`: adicionar seção `Unreleased / D-009B` com capability model, multi-participante, trust profiles e PKI FAKE, deixando claro que não há certificado legalmente válido nesta etapa.
+`CHANGELOG.md`: adicionar `Unreleased / D-009B` com capability model, multi-participante, trust profiles e PKI FAKE, declarando expressamente que nenhum certificado emitido nesta etapa tem validade jurídica ou confiança pública.
 
 - [ ] **Step 6: Rodar todos os gates**
 
@@ -678,20 +808,22 @@ Expected: todos GREEN.
 - [ ] **Step 7: Commit de fechamento da implementação D-009B**
 
 ```bash
-git add src scripts docs README.md CHANGELOG.md .github/workflows/quality.yml
+git add src scripts docs README.md CHANGELOG.md
 git commit -m "feat: complete D-009B universal trust foundation"
 ```
 
-- [ ] **Step 8: Evidência de aceite**
+- [ ] **Step 8: Registrar evidência de aceite**
 
-Registrar no PR/relatório de release os resultados dos quatro gates, quantidade de testes executados e os cenários obrigatórios da PKI FAKE: válido, expirado, revogado, cadeia desconhecida, assinatura inválida, hash divergente e timestamp adulterado. Não declarar suporte produtivo ICP-Brasil, PAdES/CAdES/XAdES ou provider comercial até as histórias D-009D–D-009G correspondentes.
+No PR/relatório de release, registrar resultados dos quatro gates, quantidade real de testes executados e os cenários PKI FAKE comprovados: válido, expirado, revogado, cadeia desconhecida, assinatura inválida, hash divergente e timestamp adulterado. Não declarar suporte produtivo ICP-Brasil ou a formatos criptográficos reais até as histórias D-009D–D-009G.
 
 ---
 
 ## Self-review do plano
 
-- Cobertura da spec: capability registry, contratos separados, multi-participante, trust profiles, PKI FAKE, persistência aditiva, compatibilidade v1, evidências de validação e security gates estão mapeados às Tasks 1–7.
-- Não há integração produtiva com provider real nesta D-009B; isso permanece deliberadamente fora do escopo.
-- Tipos centrais usados por tasks posteriores são definidos nas Tasks 1–3.
-- A PKI FAKE mantém chave privada somente em memória de teste e é bloqueada por política em produção.
+- Cobertura da spec: capability registry, contratos separados, multi-participante, trust profiles, PKI FAKE, persistência aditiva, compatibilidade v1 e security gates estão mapeados às Tasks 1–7.
+- O resultado de `SigningProvider` transporta `signedArtifact` opcional; isso permite providers assíncronos legados e a PKI FAKE síncrona no mesmo contrato.
+- A migration segue o padrão real do repositório: SQL manual + journal, sem snapshot e sem aplicação em banco real.
+- Tipos usados por tasks posteriores são definidos nas Tasks 1–3.
+- A PKI FAKE mantém chave privada apenas em memória do componente de teste e é bloqueada por política em produção.
 - O endpoint v1 e `SignatureProvider` legado permanecem preservados até depreciação futura explícita.
+- Integração produtiva com provider real permanece deliberadamente fora do escopo da D-009B.
