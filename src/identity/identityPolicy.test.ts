@@ -37,8 +37,8 @@ describe("IdentityPolicy", () => {
           version: "0.1.0",
           kind: "identity",
           trustMode: "fake",
-          levels: ["simple"],
-          formats: ["detached"],
+          signatureLevels: ["simple"],
+          signatureFormats: ["detached"],
         },
         "oidc"
       )
@@ -54,8 +54,8 @@ describe("IdentityPolicy", () => {
           version: "0.1.0",
           kind: "identity",
           trustMode: "fake",
-          levels: ["simple"],
-          formats: ["detached"],
+          signatureLevels: ["simple"],
+          signatureFormats: ["detached"],
         },
         "fake"
       )
@@ -71,8 +71,8 @@ describe("IdentityPolicy", () => {
           version: "0.1.0",
           kind: "signing",
           trustMode: "fake",
-          levels: ["simple"],
-          formats: ["detached"],
+          signatureLevels: ["simple"],
+          signatureFormats: ["detached"],
         },
         "fake"
       )
