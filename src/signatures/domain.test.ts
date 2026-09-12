@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { transitionSignatureStatus } from "./domain.js";
+import {
+  transitionSignatureStatus,
+  transitionUniversalSignatureStatus,
+} from "./domain.js";
 
 describe("signature lifecycle", () => {
   it("allows draft -> pending -> signed", () => {
@@ -24,6 +27,27 @@ describe("signature lifecycle", () => {
   it("rejects direct draft -> signed", () => {
     expect(() => transitionSignatureStatus("draft", "signed")).toThrow(
       "INVALID_SIGNATURE_TRANSITION"
+    );
+  });
+});
+
+describe("universal signature lifecycle", () => {
+  it("allows participant progress through validation to completion", () => {
+    expect(transitionUniversalSignatureStatus("draft", "awaiting_participants")).toBe(
+      "awaiting_participants"
+    );
+    expect(
+      transitionUniversalSignatureStatus("awaiting_participants", "partially_completed")
+    ).toBe("partially_completed");
+    expect(transitionUniversalSignatureStatus("partially_completed", "validating")).toBe(
+      "validating"
+    );
+    expect(transitionUniversalSignatureStatus("validating", "completed")).toBe("completed");
+  });
+
+  it("rejects mutation after completion", () => {
+    expect(() => transitionUniversalSignatureStatus("completed", "validating")).toThrow(
+      "INVALID_UNIVERSAL_SIGNATURE_TRANSITION"
     );
   });
 });
