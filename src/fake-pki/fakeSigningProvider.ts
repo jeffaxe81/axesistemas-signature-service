@@ -65,6 +65,8 @@ export class FakeSigningProvider implements SigningProvider {
     signatureFormats: ["detached"],
   };
 
+  signCalls = 0;
+
   constructor(
     private readonly authority: FakeCertificateAuthority,
     private readonly certificateSerial: string
@@ -86,6 +88,7 @@ export class FakeSigningProvider implements SigningProvider {
   }
 
   async sign(input: SigningInput): Promise<SigningResult> {
+    this.signCalls += 1;
     const artifact = await this.signBytes(Buffer.from(input.documentSha256, "utf8"));
     return {
       providerRequestId: `fake-pki:${input.requestId}`,
