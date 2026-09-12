@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import type { IdentityConsentService } from "../identity/identityConsentService.js";
+import type { IdentityPolicy } from "../identity/identityPolicy.js";
 import type {
   SigningProvider,
   TimestampProvider,
@@ -45,8 +47,23 @@ export type UniversalTrustExecutionResult = {
   validations: UniversalValidationResult[];
 };
 
+export type IdentityReadinessDependency = {
+  service: IdentityConsentService;
+  resolvePolicy(input: {
+    tenantId: string;
+    requestId: string;
+    participantId: string;
+  }): Promise<IdentityPolicy | undefined>;
+  resolveStatementHash(input: {
+    tenantId: string;
+    requestId: string;
+    participantId: string;
+  }): Promise<string>;
+};
+
 export type UniversalTrustServiceDependencies = {
   registry: ProviderRegistry;
+  identityReadiness?: IdentityReadinessDependency;
 };
 
 export class UniversalTrustService {
@@ -59,15 +76,27 @@ export class UniversalTrustService {
 
     const documentSha256 = createHash("sha256").update(input.document).digest("hex");
     const profile = resolveProfile(input.trustProfileId);
+    const providerRequestIds: string[] = [];
+    const validations: UniversalValidationResult[] = [];
+
+    const blockedStatus = await this.evaluateIdentityReadiness(input, documentSha256);
+    if (blockedStatus) {
+      return {
+        requestId: input.requestId,
+        tenantId: input.tenantId,
+        status: blockedStatus,
+        documentSha256,
+        providerRequestIds,
+        validations,
+      };
+    }
+
     const signing = asSigningProvider(
       this.dependencies.registry.resolve("signing", profile, {
         level: input.level,
         format: input.format,
       })
     );
-
-    const providerRequestIds: string[] = [];
-    const validations: UniversalValidationResult[] = [];
 
     for (const participant of input.participants) {
       const signed = await signing.sign({
@@ -133,6 +162,43 @@ export class UniversalTrustService {
       validation: validations.at(-1),
       validations,
     };
+  }
+
+  private async evaluateIdentityReadiness(
+    input: UniversalTrustExecutionInput,
+    documentSha256: string
+  ): Promise<"awaiting_identity" | "awaiting_consent" | undefined> {
+    const dependency = this.dependencies.identityReadiness;
+    if (!dependency) return undefined;
+
+    for (const participant of input.participants) {
+      const identityPolicy = await dependency.resolvePolicy({
+        tenantId: input.tenantId,
+        requestId: input.requestId,
+        participantId: participant.id,
+      });
+      if (!identityPolicy) continue;
+
+      const statementHash = await dependency.resolveStatementHash({
+        tenantId: input.tenantId,
+        requestId: input.requestId,
+        participantId: participant.id,
+      });
+      const readiness = await dependency.service.evaluateParticipantReadiness({
+        tenantId: input.tenantId,
+        requestId: input.requestId,
+        participant,
+        identityPolicy,
+        documentSha256,
+        statementHash,
+      });
+
+      if (readiness === "awaiting_identity" || readiness === "awaiting_consent") {
+        return readiness;
+      }
+    }
+
+    return undefined;
   }
 }
 
