@@ -4,6 +4,10 @@ import type {
   SignatureLevel,
   TrustMode,
 } from "../trust/capabilities.js";
+import type {
+  AuthenticationMethod,
+  IdentityAssurance,
+} from "../identity/identityPolicy.js";
 
 export type SigningInput = {
   requestId: string;
@@ -26,22 +30,65 @@ export interface SigningProvider {
   cancel(providerRequestId: string): Promise<void>;
 }
 
+export type BeginIdentityVerificationInput = {
+  tenantId: string;
+  requestId: string;
+  participantId: string;
+  method: AuthenticationMethod;
+};
+
+export type BeginIdentityVerificationResult = {
+  providerSessionId: string;
+  challengeId: string;
+  clientData: Record<string, unknown>;
+  evidence: Record<string, unknown>;
+};
+
+export type CompleteIdentityVerificationInput = {
+  tenantId: string;
+  requestId: string;
+  participantId: string;
+  providerSessionId: string;
+  challengeId: string;
+  response: Record<string, unknown>;
+};
+
+export type CompleteIdentityVerificationResult = {
+  verified: boolean;
+  denied?: boolean;
+  assurance?: IdentityAssurance;
+  acr?: string;
+  amr?: string[];
+  externalSubject?: string;
+  evidence: Record<string, unknown>;
+};
+
 export interface IdentityProvider {
   readonly descriptor: ProviderDescriptor;
-  verify(input: {
-    requestId: string;
-    participantId: string;
-    method: string;
-  }): Promise<{ verified: boolean; evidence: Record<string, unknown> }>;
+  beginVerification(
+    input: BeginIdentityVerificationInput
+  ): Promise<BeginIdentityVerificationResult>;
+  completeVerification(
+    input: CompleteIdentityVerificationInput
+  ): Promise<CompleteIdentityVerificationResult>;
 }
+
+export type RecordConsentInput = {
+  tenantId: string;
+  requestId: string;
+  participantId: string;
+  identityEvidenceId: string;
+  documentSha256: string;
+  statementHash: string;
+  decision: "accepted" | "declined";
+};
 
 export interface ConsentProvider {
   readonly descriptor: ProviderDescriptor;
-  record(input: {
-    requestId: string;
-    participantId: string;
-    statementHash: string;
-  }): Promise<{ recorded: boolean; evidence: Record<string, unknown> }>;
+  record(input: RecordConsentInput): Promise<{
+    recorded: boolean;
+    evidence: Record<string, unknown>;
+  }>;
 }
 
 export interface ValidationProvider {
