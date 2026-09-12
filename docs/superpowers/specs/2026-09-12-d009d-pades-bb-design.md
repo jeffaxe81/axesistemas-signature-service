@@ -59,6 +59,8 @@ O ciclo D-009D introduz uma engine criptográfica isolada em Java, baseada em DS
 8. O modelo deve continuar multi-tenant e sem fallback entre credenciais, tenants ou trust modes.
 9. FAKE/dev permanece isolado de produção.
 10. O nível de autenticação/assurance continua separado do nível jurídico/criptográfico da assinatura.
+11. O baseline PAdES-B-B é um nível/formato criptográfico e não estabelece, por si só, que a assinatura é juridicamente simples, avançada ou qualificada; essa classificação depende da política, da identidade, da credencial/certificado e do contexto regulatório aplicável.
+12. O uso de um PKCS#12/PFX não implica automaticamente confiança pública, ICP-Brasil ou assinatura qualificada.
 
 ## 4. Arquitetura
 
@@ -129,7 +131,7 @@ Saída esperada:
 
 ### 4.3 DSS Sidecar
 
-O sidecar será um serviço Java isolado, preferencialmente stateless em relação ao workflow da aplicação.
+O sidecar será um serviço Java isolado, stateless em relação ao workflow da aplicação. O catálogo de credenciais e secrets é configuração operacional do serviço e não estado de workflow.
 
 Responsabilidades:
 
@@ -167,7 +169,8 @@ O sidecar não poderá:
 - senha fornecida separadamente por secret/configuração protegida;
 - nenhuma persistência no banco da aplicação;
 - nenhuma passagem pelo core TypeScript;
-- nenhum conteúdo bruto em logs, evidências ou APIs.
+- nenhum conteúdo bruto em logs, evidências ou APIs;
+- seu trust mode e sua aceitabilidade são definidos pela configuração/política, não pelo formato PFX em si.
 
 ### 5.2 Catálogo multi-credencial
 
@@ -427,10 +430,12 @@ Subir core + sidecar por Docker Compose e executar uma jornada real:
 1. criar request;
 2. satisfazer identidade/consentimento quando exigidos;
 3. assinar PDF via PAdES-B-B;
-4. validar o PAdES;
+4. validar o PAdES no DSS;
 5. persistir artefato/evidência;
 6. concluir request;
 7. confirmar alteração posterior detectada como inválida.
+
+Além da validação pelo próprio DSS, pelo menos um artefato de aceite deve ser verificado por um validador PAdES independente aprovado para o ambiente de teste. Esse validador é ferramenta de interoperabilidade/aceite e não se torna dependência de produção do core.
 
 ## 15. Critérios de aceite
 
@@ -438,6 +443,7 @@ D-009D só é considerado concluído quando:
 
 - gera PDF real `application/pdf` com assinatura PAdES-B-B;
 - o PAdES é validado antes do estado `completed`;
+- pelo menos um artefato PAdES-B-B de aceite é reconhecido/validado por validador independente da engine DSS;
 - suporta FAKE/dev e PKCS#12/PFX por `credentialRef`;
 - implementa isolamento `tenantId + credentialRef`;
 - chave privada e senha nunca entram no core ou banco;
