@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased] — D-009B Universal Trust Capability Model
+
+### Entregue na fundação
+- modelo de capacidades para providers de identidade, consentimento, assinatura, validação e timestamp;
+- perfis `fake-dev`, `sandbox` e `production-standard`;
+- bloqueio fail-closed de provider FAKE em produção;
+- registry de providers sem fallback automático entre modos de confiança;
+- contratos independentes com adapter de compatibilidade para o `SignatureProvider` v0.1.0;
+- domínio multi-participante e máquina de estados universal sem remoção do domínio legado;
+- PKI/certificação FAKE baseada em Ed25519 para validação técnica do produto;
+- cenários FAKE de certificado válido, expirado, revogado e desconhecido;
+- detecção de assinatura adulterada e hash divergente;
+- timestamp FAKE com verificação de integridade;
+- chaves privadas FAKE restritas à memória do processo;
+- schema PostgreSQL/Drizzle aditivo para participantes, bindings, artefatos, validações e trust profiles;
+- `UniversalTrustService` para orquestração interna hash → assinatura → timestamp quando exigido → validação;
+- preservação dos endpoints `/v1/signature-requests` e do provider fake legado;
+- security regression gate ampliado para políticas de confiança e PKI FAKE.
+
+### Limites desta etapa
+- nenhum certificado FAKE possui validade jurídica ou confiança pública;
+- nenhum provider ICP-Brasil produtivo foi ativado;
+- PAdES, CAdES, XAdES, XMLDSig, ASiC e JAdES estão modelados como capacidades, mas não são declarados como engines criptográficas entregues nesta etapa;
+- nenhum HSM, PKCS#11, certificado A1/A3 real ou credencial produtiva foi ativado;
+- migration permanece apenas versionada, sem aplicação em banco produtivo.
+
 ## [0.1.0] — 2026-09-06
 
 Primeira versão funcional do serviço independente de assinatura digital D-009A.

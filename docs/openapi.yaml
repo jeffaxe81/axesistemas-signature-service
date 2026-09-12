@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Axesistemas Signature Service
   version: 0.1.0
-  description: API interna do D-009A. Tenant é derivado exclusivamente da credencial autenticada no servidor.
+  description: API interna compatível com D-009A, com schemas de capacidades D-009B. Tenant é derivado exclusivamente da credencial autenticada no servidor.
 servers:
   - url: /
 paths:
@@ -109,3 +109,59 @@ components:
             name: { type: string }
             document: { type: string }
             email: { type: string, format: email }
+    TrustMode:
+      type: string
+      enum: [fake, sandbox, production]
+      description: Modo de confiança do provider. `fake` é exclusivo de desenvolvimento/teste.
+    SignatureLevel:
+      type: string
+      enum: [simple, advanced, qualified]
+      description: Nível de política de assinatura modelado pelo Core; não implica provider produtivo habilitado.
+    SignatureFormat:
+      type: string
+      enum: [pades, cades, xades, xmldsig, detached, asic, jades, proprietary]
+      description: Capacidade de formato modelada para adapters; a presença do valor não declara engine criptográfica produtiva entregue.
+    Participant:
+      type: object
+      additionalProperties: false
+      required: [id, role, status, identity, authenticationMethods]
+      properties:
+        id: { type: string }
+        role:
+          type: string
+          enum: [signer, approver, witness, seal]
+        order: { type: integer, minimum: 0 }
+        status:
+          type: string
+          enum: [invited, pending, authenticated, consented, signed, rejected, expired, failed]
+        identity:
+          type: object
+          additionalProperties: false
+          required: [name]
+          properties:
+            name: { type: string }
+            document: { type: string }
+            email: { type: string, format: email }
+        authenticationMethods:
+          type: array
+          items: { type: string }
+    ProviderCapability:
+      type: object
+      additionalProperties: false
+      required: [id, version, kind, trustMode, signatureLevels, signatureFormats]
+      properties:
+        id: { type: string }
+        version: { type: string }
+        kind:
+          type: string
+          enum: [identity, consent, signing, validation, timestamp]
+        trustMode:
+          $ref: '#/components/schemas/TrustMode'
+        signatureLevels:
+          type: array
+          items:
+            $ref: '#/components/schemas/SignatureLevel'
+        signatureFormats:
+          type: array
+          items:
+            $ref: '#/components/schemas/SignatureFormat'
