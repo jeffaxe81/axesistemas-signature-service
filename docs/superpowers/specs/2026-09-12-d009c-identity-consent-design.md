@@ -220,6 +220,8 @@ An `IdentityPolicy` SHOULD contain at least:
 
 Policy resolution MUST remain fail-closed. An unknown or unsupported method, assurance, provider or trust-mode combination MUST NOT downgrade to a weaker method automatically.
 
+A provider is usable only when it satisfies **both** layers: the active `TrustProfile` MUST allow its trust mode/provider identity and the active `IdentityPolicy` MUST allow its identity/consent use. Approval by only one layer is insufficient.
+
 ## 7. Provider contracts
 
 ### 7.1 IdentityProvider
@@ -273,15 +275,15 @@ D-009C MUST add:
 
 Both providers MUST declare `trustMode: "fake"` and MUST be rejected by sandbox or production profiles.
 
-The FAKE identity provider MUST support deterministic test scenarios for:
+The FAKE identity provider MUST support deterministic provider outcomes for:
 
 - successful verification;
 - invalid response;
 - denied verification;
-- expired challenge;
-- replay attempt;
 - insufficient assurance;
 - provider failure.
+
+Expiration, replay detection and attempt exhaustion are responsibilities of `IdentitySession`/`IdentityConsentService` and MUST be tested there. The FAKE provider MUST NOT implement a shortcut that bypasses those protections.
 
 The FAKE consent provider MUST support:
 
