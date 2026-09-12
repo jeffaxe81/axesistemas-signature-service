@@ -67,14 +67,8 @@ const completeParamsSchema = baseParamsSchema
   .extend({ sessionId: z.string().trim().min(1).max(200) })
   .strict();
 
-const startSchema = z
-  .object({ method: z.enum(authenticationMethods) })
-  .strict();
-
-const completeSchema = z
-  .object({ response: z.record(z.string(), z.unknown()) })
-  .strict();
-
+const startSchema = z.object({ method: z.enum(authenticationMethods) }).strict();
+const completeSchema = z.object({ response: z.record(z.string(), z.unknown()) }).strict();
 const consentSchema = z
   .object({
     statement: z.string().min(1).max(20_000),
@@ -98,6 +92,22 @@ const statusByError: Record<string, number> = {
   PROVIDER_PROTOCOL_ERROR: 502,
 };
 
+type IdentityRouteContext = {
+  participant: Participant;
+  trustProfile: TrustProfile;
+  identityPolicy: IdentityPolicy;
+};
+
+type ConsentRouteContext = IdentityRouteContext & {
+  documentSha256: string;
+  consentStatement: string;
+};
+
+type ReadinessRouteContext = IdentityRouteContext & {
+  documentSha256: string;
+  statementHash: string;
+};
+
 function authenticatedContext(
   request: FastifyRequest,
   resolveAuthIdentity: ResolveAuthIdentity
@@ -111,35 +121,74 @@ function authenticatedContext(
   }
 }
 
-async function resolveContext(
+async function resolveIdentityContext(
   options: IdentityConsentRouteOptions,
   tenantId: string,
   requestId: string,
   participantId: string
-): Promise<
-  | {
-      participant: Participant;
-      trustProfile: TrustProfile;
-      identityPolicy: IdentityPolicy;
-      documentSha256: string;
-      consentStatement: string;
-    }
-  | undefined
-> {
-  const [participant, trustProfile, identityPolicy, documentSha256, consentStatement] =
-    await Promise.all([
-      options.resolveParticipant({ tenantId, requestId, participantId }),
-      options.resolveTrustProfile({ tenantId, requestId }),
-      options.resolveIdentityPolicy({ tenantId, requestId, participantId }),
-      options.resolveDocumentSha256({ tenantId, requestId }),
-      options.resolveConsentStatement({ tenantId, requestId, participantId }),
-    ]);
+): Promise<IdentityRouteContext | undefined> {
+  const [participant, trustProfile, identityPolicy] = await Promise.all([
+    options.resolveParticipant({ tenantId, requestId, participantId }),
+    options.resolveTrustProfile({ tenantId, requestId }),
+    options.resolveIdentityPolicy({ tenantId, requestId, participantId }),
+  ]);
 
-  if (!participant || !trustProfile || !identityPolicy || !documentSha256 || !consentStatement) {
-    return undefined;
+  if (!participant || !trustProfile || !identityPolicy) return undefined;
+  return { participant, trustProfile, identityPolicy };
+}
+
+async function resolveConsentContext(
+  options: IdentityConsentRouteOptions,
+  tenantId: string,
+  requestId: string,
+  participantId: string
+): Promise<ConsentRouteContext | undefined> {
+  const identityContext = await resolveIdentityContext(
+    options,
+    tenantId,
+    requestId,
+    participantId
+  );
+  if (!identityContext) return undefined;
+
+  const [documentSha256, consentStatement] = await Promise.all([
+    options.resolveDocumentSha256({ tenantId, requestId }),
+    options.resolveConsentStatement({ tenantId, requestId, participantId }),
+  ]);
+  if (!documentSha256 || !consentStatement) return undefined;
+
+  return { ...identityContext, documentSha256, consentStatement };
+}
+
+async function resolveReadinessContext(
+  options: IdentityConsentRouteOptions,
+  tenantId: string,
+  requestId: string,
+  participantId: string
+): Promise<ReadinessRouteContext | undefined> {
+  const identityContext = await resolveIdentityContext(
+    options,
+    tenantId,
+    requestId,
+    participantId
+  );
+  if (!identityContext) return undefined;
+
+  if (!identityContext.identityPolicy.consentRequired) {
+    return { ...identityContext, documentSha256: "", statementHash: "" };
   }
 
-  return { participant, trustProfile, identityPolicy, documentSha256, consentStatement };
+  const [documentSha256, consentStatement] = await Promise.all([
+    options.resolveDocumentSha256({ tenantId, requestId }),
+    options.resolveConsentStatement({ tenantId, requestId, participantId }),
+  ]);
+  if (!documentSha256 || !consentStatement) return undefined;
+
+  return {
+    ...identityContext,
+    documentSha256,
+    statementHash: sha256(normalizedStatement(consentStatement)),
+  };
 }
 
 function normalizedStatement(value: string): string {
@@ -150,7 +199,10 @@ function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function sendDomainError(reply: { code(statusCode: number): { send(payload: unknown): unknown } }, error: unknown) {
+function sendDomainError(
+  reply: { code(statusCode: number): { send(payload: unknown): unknown } },
+  error: unknown
+) {
   if (!(error instanceof Error)) {
     return reply.code(500).send({ error: "IDENTITY_CONSENT_INTERNAL_ERROR" });
   }
@@ -178,27 +230,27 @@ export function registerIdentityConsentRoutes(
         return reply.code(400).send({ error: "INVALID_IDENTITY_REQUEST" });
       }
 
-      const context = await resolveContext(
-        options,
-        auth.context.tenantId,
-        params.data.requestId,
-        params.data.participantId
-      );
-      if (!context) {
-        return reply.code(404).send({ error: "PARTICIPANT_NOT_FOUND" });
-      }
-
-      const limited = options.rateLimiter.consume(
-        `${auth.context.tenantId}:${params.data.requestId}:${params.data.participantId}:identity-start`,
-        options.now()
-      );
-      if (!limited.allowed) {
-        return reply
-          .code(429)
-          .send({ error: "RATE_LIMITED", retryAfterSeconds: limited.retryAfterSeconds });
-      }
-
       try {
+        const context = await resolveIdentityContext(
+          options,
+          auth.context.tenantId,
+          params.data.requestId,
+          params.data.participantId
+        );
+        if (!context) {
+          return reply.code(404).send({ error: "PARTICIPANT_NOT_FOUND" });
+        }
+
+        const limited = options.rateLimiter.consume(
+          `${auth.context.tenantId}:${params.data.requestId}:${params.data.participantId}:identity-start`,
+          options.now()
+        );
+        if (!limited.allowed) {
+          return reply
+            .code(429)
+            .send({ error: "RATE_LIMITED", retryAfterSeconds: limited.retryAfterSeconds });
+        }
+
         const result = await options.service.startIdentityVerification({
           tenantId: auth.context.tenantId,
           requestId: params.data.requestId,
@@ -227,27 +279,27 @@ export function registerIdentityConsentRoutes(
         return reply.code(400).send({ error: "INVALID_IDENTITY_REQUEST" });
       }
 
-      const context = await resolveContext(
-        options,
-        auth.context.tenantId,
-        params.data.requestId,
-        params.data.participantId
-      );
-      if (!context) {
-        return reply.code(404).send({ error: "PARTICIPANT_NOT_FOUND" });
-      }
-
-      const limited = options.rateLimiter.consume(
-        `${auth.context.tenantId}:${params.data.requestId}:${params.data.participantId}:identity-complete`,
-        options.now()
-      );
-      if (!limited.allowed) {
-        return reply
-          .code(429)
-          .send({ error: "RATE_LIMITED", retryAfterSeconds: limited.retryAfterSeconds });
-      }
-
       try {
+        const context = await resolveIdentityContext(
+          options,
+          auth.context.tenantId,
+          params.data.requestId,
+          params.data.participantId
+        );
+        if (!context) {
+          return reply.code(404).send({ error: "PARTICIPANT_NOT_FOUND" });
+        }
+
+        const limited = options.rateLimiter.consume(
+          `${auth.context.tenantId}:${params.data.requestId}:${params.data.participantId}:identity-complete`,
+          options.now()
+        );
+        if (!limited.allowed) {
+          return reply
+            .code(429)
+            .send({ error: "RATE_LIMITED", retryAfterSeconds: limited.retryAfterSeconds });
+        }
+
         const evidence = await options.service.completeIdentityVerification({
           tenantId: auth.context.tenantId,
           requestId: params.data.requestId,
@@ -283,20 +335,23 @@ export function registerIdentityConsentRoutes(
         return reply.code(400).send({ error: "INVALID_CONSENT_REQUEST" });
       }
 
-      const context = await resolveContext(
-        options,
-        auth.context.tenantId,
-        params.data.requestId,
-        params.data.participantId
-      );
-      if (!context) {
-        return reply.code(404).send({ error: "PARTICIPANT_NOT_FOUND" });
-      }
-      if (normalizedStatement(body.data.statement) !== normalizedStatement(context.consentStatement)) {
-        return reply.code(400).send({ error: "INVALID_CONSENT_REQUEST" });
-      }
-
       try {
+        const context = await resolveConsentContext(
+          options,
+          auth.context.tenantId,
+          params.data.requestId,
+          params.data.participantId
+        );
+        if (!context) {
+          return reply.code(404).send({ error: "PARTICIPANT_NOT_FOUND" });
+        }
+        if (
+          normalizedStatement(body.data.statement) !==
+          normalizedStatement(context.consentStatement)
+        ) {
+          return reply.code(400).send({ error: "INVALID_CONSENT_REQUEST" });
+        }
+
         const consent = await options.service.recordConsent({
           tenantId: auth.context.tenantId,
           requestId: params.data.requestId,
@@ -331,24 +386,24 @@ export function registerIdentityConsentRoutes(
         return reply.code(400).send({ error: "INVALID_IDENTITY_REQUEST" });
       }
 
-      const context = await resolveContext(
-        options,
-        auth.context.tenantId,
-        params.data.requestId,
-        params.data.participantId
-      );
-      if (!context) {
-        return reply.code(404).send({ error: "PARTICIPANT_NOT_FOUND" });
-      }
-
       try {
+        const context = await resolveReadinessContext(
+          options,
+          auth.context.tenantId,
+          params.data.requestId,
+          params.data.participantId
+        );
+        if (!context) {
+          return reply.code(404).send({ error: "PARTICIPANT_NOT_FOUND" });
+        }
+
         const readiness = await options.service.evaluateParticipantReadiness({
           tenantId: auth.context.tenantId,
           requestId: params.data.requestId,
           participant: context.participant,
           identityPolicy: context.identityPolicy,
           documentSha256: context.documentSha256,
-          statementHash: sha256(normalizedStatement(context.consentStatement)),
+          statementHash: context.statementHash,
         });
         return reply.send({ readiness });
       } catch (error) {
