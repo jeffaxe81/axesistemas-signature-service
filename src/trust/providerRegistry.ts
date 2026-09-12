@@ -28,6 +28,13 @@ export class ProviderRegistry {
       format: SignatureFormat;
     }
   ): RegisteredProvider {
+    if (
+      !profile.allowedLevels.includes(requirements.level) ||
+      !profile.allowedFormats.includes(requirements.format)
+    ) {
+      throw new Error("UNSUPPORTED_CAPABILITY");
+    }
+
     const candidate = this.providers.find(provider => {
       if (provider.descriptor.kind !== kind) return false;
 

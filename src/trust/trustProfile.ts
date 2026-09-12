@@ -61,6 +61,10 @@ export function assertProviderAllowed(
     throw new Error("TRUST_POLICY_VIOLATION");
   }
 
+  if (provider.trustMode !== profile.trustMode) {
+    throw new Error("TRUST_POLICY_VIOLATION");
+  }
+
   if (
     profile.allowedProviderIds !== "*" &&
     !profile.allowedProviderIds.includes(provider.id)
