@@ -14,6 +14,7 @@ export type IdentitySession = {
   requestId: string;
   participantId: string;
   providerId: string;
+  providerSessionId: string;
   method: AuthenticationMethod;
   purpose: "document-signing";
   status: IdentitySessionStatus;
@@ -33,6 +34,7 @@ export type CreateIdentitySessionInput = {
   requestId: string;
   participantId: string;
   providerId: string;
+  providerSessionId?: string;
   method: AuthenticationMethod;
   challengeId: string;
   challengeDigest: string;
@@ -62,6 +64,7 @@ export function createIdentitySession(input: CreateIdentitySessionInput): Identi
     requestId: input.requestId,
     participantId: input.participantId,
     providerId: input.providerId,
+    providerSessionId: input.providerSessionId ?? input.challengeId,
     method: input.method,
     purpose: "document-signing",
     status: "challenge_pending",

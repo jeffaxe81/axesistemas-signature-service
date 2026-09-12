@@ -31,6 +31,9 @@ export class FakeIdentityProvider implements IdentityProvider {
     signatureFormats: ["detached"],
   };
 
+  beginCalls = 0;
+  completeCalls = 0;
+
   private readonly sessions = new Map<string, FakeProviderSession>();
 
   constructor(private readonly options: FakeIdentityProviderOptions) {}
@@ -38,6 +41,7 @@ export class FakeIdentityProvider implements IdentityProvider {
   async beginVerification(
     input: BeginIdentityVerificationInput
   ): Promise<BeginIdentityVerificationResult> {
+    this.beginCalls += 1;
     const providerSessionId = randomUUID();
     const challengeId = randomUUID();
     this.sessions.set(providerSessionId, {
@@ -58,6 +62,8 @@ export class FakeIdentityProvider implements IdentityProvider {
   async completeVerification(
     input: CompleteIdentityVerificationInput
   ): Promise<CompleteIdentityVerificationResult> {
+    this.completeCalls += 1;
+
     if (this.options.fail) {
       throw new Error("IDENTITY_PROVIDER_UNAVAILABLE");
     }
