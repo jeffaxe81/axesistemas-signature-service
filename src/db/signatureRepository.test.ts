@@ -23,4 +23,18 @@ describe("SignatureRepository tenant isolation", () => {
     await expect(repo.updateStatus("tenant-b", fixture.id, "pending")).resolves.toBe(false);
     await expect(repo.findById("tenant-a", fixture.id)).resolves.toEqual(fixture);
   });
+
+  it("rejects evidence from another tenant", async () => {
+    const repo = new InMemorySignatureRepository();
+    await expect(
+      repo.appendEvidence("tenant-a", {
+        id: "ev-1",
+        requestId: "req-1",
+        tenantId: "tenant-b",
+        type: "validation.completed",
+        payload: {},
+        createdAt: "2026-09-12T12:00:00Z",
+      })
+    ).rejects.toThrow("TENANT_MISMATCH");
+  });
 });
