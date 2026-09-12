@@ -3,7 +3,7 @@ package com.axesistemas.signature.crypto.pades;
 import java.io.IOException;
 import java.util.Map;
 import org.springframework.core.io.ByteArrayResource;
-import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -37,7 +37,7 @@ public class PadesController {
       consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
       produces = MediaType.MULTIPART_FORM_DATA_VALUE
   )
-  public ResponseEntity<MultiValueMap<String, Object>> sign(
+  public ResponseEntity<MultiValueMap<String, HttpEntity<?>>> sign(
       @RequestPart("metadata") PadesSigningService.SignRequest metadata,
       @RequestPart("document") MultipartFile document
   ) throws IOException {
