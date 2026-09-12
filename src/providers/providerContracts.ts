@@ -8,6 +8,10 @@ import type {
   AuthenticationMethod,
   IdentityAssurance,
 } from "../identity/identityPolicy.js";
+import type {
+  PadesBaseline,
+  VisualSignatureMode,
+} from "../crypto/cryptoFormatEngine.js";
 
 export type SigningInput = {
   requestId: string;
@@ -15,6 +19,12 @@ export type SigningInput = {
   documentSha256: string;
   level: SignatureLevel;
   format: SignatureFormat;
+  tenantId?: string;
+  document?: Buffer;
+  sourceDocumentSha256?: string;
+  credentialRef?: string;
+  baseline?: PadesBaseline;
+  visualSignature?: VisualSignatureMode;
 };
 
 export type SigningResult = {
