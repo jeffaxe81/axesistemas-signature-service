@@ -1,0 +1,15 @@
+axesistemas:
+  crypto:
+    max-pdf-bytes: ${CRYPTO_MAX_PDF_BYTES:10485760}
+    internal-token: ${CRYPTO_INTERNAL_TOKEN}
+    credentials:
+      - tenant-id: ${CRYPTO_FAKE_TENANT_ID:tenant-dev}
+        credential-ref: ${CRYPTO_FAKE_CREDENTIAL_REF:fake-dev-01}
+        trust-mode: fake
+        pkcs12-path: ${CRYPTO_FAKE_PKCS12_PATH:/run/secrets/fake-dev-01.p12}
+        password-env: ${CRYPTO_FAKE_PASSWORD_ENV:FAKE_DEV_01_PASSWORD}
+
+server:
+  error:
+    include-message: never
+    include-stacktrace: never
