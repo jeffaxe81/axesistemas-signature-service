@@ -44,6 +44,8 @@ export function transitionSignatureStatus(
 
 export type UniversalSignatureStatus =
   | "draft"
+  | "awaiting_identity"
+  | "awaiting_consent"
   | "awaiting_participants"
   | "partially_completed"
   | "validating"
@@ -69,7 +71,28 @@ const allowedUniversalTransitions: Record<
   UniversalSignatureStatus,
   readonly UniversalSignatureStatus[]
 > = {
-  draft: ["awaiting_participants", "cancelled", "failed"],
+  draft: [
+    "awaiting_identity",
+    "awaiting_consent",
+    "awaiting_participants",
+    "cancelled",
+    "failed",
+  ],
+  awaiting_identity: [
+    "awaiting_consent",
+    "awaiting_participants",
+    "rejected",
+    "expired",
+    "cancelled",
+    "failed",
+  ],
+  awaiting_consent: [
+    "awaiting_participants",
+    "rejected",
+    "expired",
+    "cancelled",
+    "failed",
+  ],
   awaiting_participants: [
     "partially_completed",
     "validating",
