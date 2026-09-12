@@ -8,6 +8,13 @@
       "when": 1788716400000,
       "tag": "0000_d009a_signature_service",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789236000000,
+      "tag": "0001_d009b_universal_trust",
+      "breakpoints": true
     }
   ]
 }
