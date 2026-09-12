@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   transitionSignatureStatus,
   transitionUniversalSignatureStatus,
+  type UniversalSignatureStatus,
 } from "./domain.js";
 
 describe("signature lifecycle", () => {
@@ -43,6 +44,11 @@ describe("universal signature lifecycle", () => {
       "validating"
     );
     expect(transitionUniversalSignatureStatus("validating", "completed")).toBe("completed");
+  });
+
+  it("recognizes identity and consent waiting states in the universal model", () => {
+    const states: UniversalSignatureStatus[] = ["awaiting_identity", "awaiting_consent"];
+    expect(states).toEqual(["awaiting_identity", "awaiting_consent"]);
   });
 
   it("rejects mutation after completion", () => {
