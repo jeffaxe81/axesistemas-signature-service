@@ -159,3 +159,91 @@ export const trustProfiles = pgTable(
     index("trust_profiles_tenant_mode_idx").on(table.tenantId, table.trustMode),
   ]
 );
+
+export const identitySessions = pgTable(
+  "identity_sessions",
+  {
+    tenantId: text("tenant_id").notNull(),
+    id: text("id").notNull(),
+    requestId: text("request_id").notNull(),
+    participantId: text("participant_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    providerSessionId: text("provider_session_id").notNull(),
+    method: text("method").notNull(),
+    purpose: text("purpose").notNull(),
+    status: text("status").notNull(),
+    challengeId: text("challenge_id").notNull(),
+    challengeDigest: varchar("challenge_digest", { length: 64 }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    attemptCount: integer("attempt_count").notNull(),
+    maxAttempts: integer("max_attempts").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  table => [
+    primaryKey({ columns: [table.tenantId, table.id] }),
+    index("identity_sessions_tenant_request_participant_idx").on(
+      table.tenantId,
+      table.requestId,
+      table.participantId
+    ),
+  ]
+);
+
+export const identityEvidences = pgTable(
+  "identity_evidences",
+  {
+    tenantId: text("tenant_id").notNull(),
+    id: text("id").notNull(),
+    requestId: text("request_id").notNull(),
+    participantId: text("participant_id").notNull(),
+    identitySessionId: text("identity_session_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    method: text("method").notNull(),
+    assurance: text("assurance").notNull(),
+    acr: text("acr"),
+    amr: jsonb("amr").$type<string[]>(),
+    externalSubjectHash: varchar("external_subject_hash", { length: 64 }),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull(),
+    providerEvidence: jsonb("provider_evidence").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  table => [
+    primaryKey({ columns: [table.tenantId, table.id] }),
+    index("identity_evidences_tenant_request_participant_idx").on(
+      table.tenantId,
+      table.requestId,
+      table.participantId
+    ),
+  ]
+);
+
+export const consentRecords = pgTable(
+  "consent_records",
+  {
+    tenantId: text("tenant_id").notNull(),
+    id: text("id").notNull(),
+    requestId: text("request_id").notNull(),
+    participantId: text("participant_id").notNull(),
+    identityEvidenceId: text("identity_evidence_id").notNull(),
+    documentSha256: varchar("document_sha256", { length: 64 }).notNull(),
+    statementHash: varchar("statement_hash", { length: 64 }).notNull(),
+    decision: text("decision").notNull(),
+    status: text("status").notNull(),
+    providerId: text("provider_id").notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    declinedAt: timestamp("declined_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    providerEvidence: jsonb("provider_evidence").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  table => [
+    primaryKey({ columns: [table.tenantId, table.id] }),
+    index("consent_records_tenant_request_participant_idx").on(
+      table.tenantId,
+      table.requestId,
+      table.participantId
+    ),
+  ]
+);

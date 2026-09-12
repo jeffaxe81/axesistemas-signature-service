@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Axesistemas Signature Service
   version: 0.1.0
-  description: API interna compatível com D-009A, com schemas de capacidades D-009B. Tenant é derivado exclusivamente da credencial autenticada no servidor.
+  description: API interna compatível com D-009A/D-009B, com fundação D-009C para identidade, consentimento e readiness. Tenant é derivado exclusivamente da credencial autenticada no servidor.
 servers:
   - url: /
 paths:
@@ -82,11 +82,182 @@ paths:
         '401': { description: Credencial ausente ou desconhecida }
         '403': { description: Contexto de tenant não resolvido }
         '404': { description: Solicitação não encontrada no tenant autenticado }
+  /v1/signature-requests/{requestId}/participants/{participantId}/identity-sessions:
+    post:
+      operationId: startIdentityVerification
+      description: Inicia um challenge de identidade para o participante no tenant autenticado. Disponibilidade de um método no schema não implica adapter produtivo entregue; `fake` é exclusivo de desenvolvimento/QA.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ParticipantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [method]
+              properties:
+                method:
+                  $ref: '#/components/schemas/AuthenticationMethod'
+      responses:
+        '201':
+          description: Challenge criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentitySessionStartResponse'
+        '400':
+          description: Requisição inválida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DomainError' }
+        '401': { description: Credencial ausente ou desconhecida }
+        '403': { description: Contexto/política não autorizada }
+        '404': { description: Participante não encontrado no tenant autenticado }
+        '429':
+          description: Limite process-local de challenge atingido
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/DomainError'
+                  - type: object
+                    properties:
+                      retryAfterSeconds: { type: integer, minimum: 1 }
+  /v1/signature-requests/{requestId}/participants/{participantId}/identity-sessions/{sessionId}/complete:
+    post:
+      operationId: completeIdentityVerification
+      description: Conclui um challenge existente. A resposta pública é sanitizada e não expõe providerEvidence, subject externo bruto, tokens ou segredos do provider.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ParticipantId'
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentityCompletionRequest'
+      responses:
+        '200':
+          description: Identidade autenticada
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status, identityEvidenceId, assurance, method, verifiedAt]
+                properties:
+                  status: { type: string, const: authenticated }
+                  identityEvidenceId: { type: string }
+                  assurance: { $ref: '#/components/schemas/IdentityAssurance' }
+                  method: { $ref: '#/components/schemas/AuthenticationMethod' }
+                  verifiedAt: { type: string, format: date-time }
+        '400':
+          description: Challenge/resposta inválida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DomainError' }
+        '401': { description: Credencial ausente ou desconhecida }
+        '403': { description: Assurance/política insuficiente }
+        '404': { description: Participante ou contexto não encontrado no tenant autenticado }
+        '409': { description: Replay ou conflito de estado }
+        '410': { description: Challenge expirado }
+        '429': { description: Limite process-local de tentativas atingido }
+        '502': { description: Violação do contrato do provider }
+        '503': { description: Provider de identidade indisponível }
+  /v1/signature-requests/{requestId}/participants/{participantId}/consents:
+    post:
+      operationId: recordParticipantConsent
+      description: Registra decisão final de consentimento vinculada à identidade verificada, ao documento atual e à declaração canônica resolvida no servidor. O cliente não fornece hash do documento.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ParticipantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsentRequest'
+      responses:
+        '201':
+          description: Consentimento final registrado
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [consentId, status, statementHash, decision]
+                properties:
+                  consentId: { type: string }
+                  status: { type: string, enum: [accepted, declined] }
+                  statementHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+                  decision: { type: string, enum: [accepted, declined] }
+        '400':
+          description: Texto/estrutura de consentimento inválido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DomainError' }
+        '401': { description: Credencial ausente ou desconhecida }
+        '403': { description: Política não autorizada }
+        '404': { description: Participante não encontrado no tenant autenticado }
+        '409': { description: Identidade/consentimento incompatível com estado atual }
+        '502': { description: Violação do contrato do provider }
+  /v1/signature-requests/{requestId}/participants/{participantId}/readiness:
+    get:
+      operationId: getParticipantReadiness
+      description: Recalcula readiness a partir da política, identidade, consentimento, documento e declaração atuais. Readiness não é armazenado como Boolean persistido.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ParticipantId'
+      responses:
+        '200':
+          description: Readiness atual do participante
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [readiness]
+                properties:
+                  readiness:
+                    $ref: '#/components/schemas/ParticipantReadiness'
+        '400':
+          description: Identificadores inválidos
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DomainError' }
+        '401': { description: Credencial ausente ou desconhecida }
+        '403': { description: Contexto de tenant não resolvido }
+        '404': { description: Participante não encontrado no tenant autenticado }
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
+  parameters:
+    RequestId:
+      in: path
+      name: requestId
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 200 }
+    ParticipantId:
+      in: path
+      name: participantId
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 200 }
   schemas:
     PublicSignatureRequest:
       type: object
@@ -165,3 +336,56 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SignatureFormat'
+    AuthenticationMethod:
+      type: string
+      enum: [fake, email_otp, sms_otp, totp, oidc, webauthn, biometric, govbr]
+      description: Método de autenticação modelado pela D-009C. A presença de um valor não implica adapter produtivo entregue. `fake` é estritamente não produtivo.
+    IdentityAssurance:
+      type: string
+      enum: [basic, strong, high]
+      description: Nível de assurance da autenticação de identidade. Não determina por si só o nível jurídico da assinatura eletrônica/digital do documento.
+    IdentitySessionStartResponse:
+      type: object
+      additionalProperties: false
+      required: [sessionId, challengeId, clientData]
+      properties:
+        sessionId: { type: string }
+        challengeId: { type: string }
+        clientData:
+          type: object
+          additionalProperties: true
+          description: Dados seguros necessários à continuação do challenge. Não inclui providerSessionId ou segredo de servidor.
+    IdentityCompletionRequest:
+      type: object
+      additionalProperties: false
+      required: [response]
+      properties:
+        response:
+          type: object
+          additionalProperties: true
+          description: Resposta ao challenge. O Core não persiste a resposta bruta como evidência de sessão.
+    ConsentRequest:
+      type: object
+      additionalProperties: false
+      required: [statement, decision]
+      properties:
+        statement:
+          type: string
+          minLength: 1
+          maxLength: 20000
+          description: Texto exibido ao usuário. Deve coincidir com a declaração canônica resolvida pelo servidor.
+        decision:
+          type: string
+          enum: [accepted, declined]
+    ParticipantReadiness:
+      type: string
+      enum: [awaiting_identity, awaiting_consent, ready_to_sign]
+      description: Estado derivado a cada consulta; não é persistido como Boolean definitivo.
+    DomainError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Código estável de domínio; mensagens desconhecidas de providers não são propagadas diretamente.

@@ -1,6 +1,35 @@
 # Changelog
 
-## [Unreleased] — D-009B Universal Trust Capability Model
+## [Unreleased] — D-009C Identity & Consent Foundation
+
+### Entregue na fundação
+- modelo de métodos de autenticação e níveis de assurance independentes do nível jurídico da assinatura;
+- `IdentityPolicy` com métodos/providers permitidos, assurance mínima, TTL e limite de tentativas;
+- lifecycle de sessão de identidade com proteção de expiração, replay e max attempts;
+- providers FAKE de identidade e consentimento para dev/QA, ambos com `trustMode: "fake"`;
+- external subject persistido somente como SHA-256;
+- consentimento imutável vinculado ao tenant, request, participante, identidade verificada, hash do documento e hash da declaração;
+- readiness derivado em `awaiting_identity`, `awaiting_consent` ou `ready_to_sign`;
+- `UniversalTrustService` bloqueando a assinatura antes de identidade/consentimento quando a política D-009C é aplicável;
+- fluxo FAKE integrado `awaiting_identity -> awaiting_consent -> ready_to_sign -> completed`;
+- alteração do documento invalida o consentimento anterior para readiness sem nova chamada de assinatura;
+- tabelas tenant-scoped `identity_sessions`, `identity_evidences` e `consent_records`;
+- adapter Drizzle com filtros explícitos de tenant;
+- migration aditiva `0002_d009c_identity_consent.sql` e journal correspondente;
+- API HTTP para iniciar/completar identidade, registrar consentimento e consultar readiness;
+- rate limiter fixed-window process-local para operações de challenge;
+- normalização de erros sem expor mensagens desconhecidas de providers;
+- security regression gate ampliado para isolamento tenant, replay, providers FAKE, secret-persistence guard e readiness antes da assinatura.
+
+### Limites desta etapa
+- `fake-identity`, `fake-consent` e `FAKE-OK` são exclusivos de desenvolvimento, QA e homologação técnica;
+- nenhum adapter real Gov.br, OIDC, WebAuthn/passkey, biometria, SMS OTP ou e-mail OTP foi entregue nesta etapa;
+- autenticação forte não determina por si só o enquadramento jurídico da assinatura do documento;
+- o rate limiter atual é process-local e deverá ser substituído/estendido por mecanismo distribuído em implantação horizontal;
+- nenhuma migration D-009C foi aplicada automaticamente em banco produtivo ou compartilhado;
+- nenhuma credencial produtiva ou segredo de provider foi adicionado ao repositório.
+
+## D-009B — Universal Trust Capability Model
 
 ### Entregue na fundação
 - modelo de capacidades para providers de identidade, consentimento, assinatura, validação e timestamp;
