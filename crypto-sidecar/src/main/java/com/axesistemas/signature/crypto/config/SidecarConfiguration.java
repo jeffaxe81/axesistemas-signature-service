@@ -2,7 +2,11 @@ package com.axesistemas.signature.crypto.config;
 
 import com.axesistemas.signature.crypto.credentials.CredentialCatalog;
 import com.axesistemas.signature.crypto.credentials.CredentialDescriptor;
+import com.axesistemas.signature.crypto.credentials.PasswordResolver;
+import com.axesistemas.signature.crypto.pades.PadesSigningService;
+import com.axesistemas.signature.crypto.pades.PadesValidationService;
 import com.axesistemas.signature.crypto.security.InternalAuthFilter;
+import java.time.Clock;
 import java.util.stream.Collectors;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -23,6 +27,42 @@ public class SidecarConfiguration {
         ))
         .collect(Collectors.toUnmodifiableList());
     return new CredentialCatalog(descriptors);
+  }
+
+  @Bean
+  PasswordResolver passwordResolver() {
+    return envName -> {
+      String value = System.getenv(envName);
+      if (value == null || value.isBlank()) {
+        throw new IllegalArgumentException("CREDENTIAL_UNAVAILABLE");
+      }
+      return value.toCharArray();
+    };
+  }
+
+  @Bean
+  Clock cryptoClock() {
+    return Clock.systemUTC();
+  }
+
+  @Bean
+  PadesSigningService padesSigningService(
+      CredentialCatalog catalog,
+      PasswordResolver passwordResolver,
+      CryptoProperties properties,
+      Clock cryptoClock
+  ) {
+    return new PadesSigningService(
+        catalog,
+        passwordResolver,
+        properties.getMaxPdfBytes(),
+        cryptoClock
+    );
+  }
+
+  @Bean
+  PadesValidationService padesValidationService(CryptoProperties properties) {
+    return new PadesValidationService(properties.getMaxPdfBytes());
   }
 
   @Bean
