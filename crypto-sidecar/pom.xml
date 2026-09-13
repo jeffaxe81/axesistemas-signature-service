@@ -19,6 +19,7 @@
   <properties>
     <java.version>21</java.version>
     <dss.version>6.4</dss.version>
+    <pdfbox.version>3.0.6</pdfbox.version>
   </properties>
 
   <dependencies>
@@ -39,6 +40,13 @@
       <groupId>eu.europa.ec.joinup.sd-dss</groupId>
       <artifactId>dss-pades-pdfbox</artifactId>
       <version>${dss.version}</version>
+    </dependency>
+    <!-- DSS 6.4 requires PDFBox 3.0.6. Keep it direct so Maven mediation cannot
+         select an older transitive PDFBox that lacks Standard14Fonts.FontName. -->
+    <dependency>
+      <groupId>org.apache.pdfbox</groupId>
+      <artifactId>pdfbox</artifactId>
+      <version>${pdfbox.version}</version>
     </dependency>
     <dependency>
       <groupId>eu.europa.ec.joinup.sd-dss</groupId>
